@@ -1,8 +1,9 @@
-def evolve(omega0,detuning,chirp,rabi0,pulse_duration):
+def evolve(velocity_bins,omega0,detuning,chirp,rabi0,pulse_duration):
     
     rabi = lambda t, args: rabi0 * np.exp(-4*np.log(2)*(t-tcentre)**2/pulse_duration**2)
     final_states = []
     for vel in velocity_bins:
+        
         H0 = hbar*qt.Qobj([[0,0],[0,omega0*vel/c +detuning*(1+vel/c)]])
         H_chirp = hbar*qt.Qobj([[0,0],[0,chirp*(1+vel/c)]])
         H_transition = 0.5*hbar*qt.sigmax()
@@ -27,7 +28,7 @@ def update_states(states, transitions):
 
 
 # Evolve with an arbitrary initial state, and return the evolved states
-def evolve_train(omega0,detuning,chirp,rabi0,pulse_duration,previous_states):
+def evolve_train(velocity_bins,omega0,detuning,chirp,rabi0,pulse_duration,previous_states):
     rabi = lambda t, args: rabi0 * np.exp(-4*np.log(2)*(t-tcentre)**2/pulse_duration**2)
     final_states = []
     size = velocity_bins.size
