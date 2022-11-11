@@ -1,2 +1,2 @@
 ﻿# Simulations for master thesis 2022-2023
-Current main simulation is "basic_cmt.ipynb"
+The most updated simulations are in 04_cmt_tensor.ipynb
