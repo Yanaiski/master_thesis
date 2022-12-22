@@ -22,8 +22,8 @@ class laser:
         self.endTime =  pulse_kwargs["end"] #ps 
         
         self.binwidth = 2*np.pi/self.omega0*100
-        self.N_time = int(self.endTime/self.binwidth)
-        self.tlist = np.linspace(0,self.endTime,self.N_time)
+        self.N_time = int((self.endTime-self.startTime)/self.binwidth)
+        self.tlist = np.linspace(self.startTime,self.endTime,self.N_time)
         self.tcentre = (self.endTime-self.startTime)/2 + self.startTime #ps
         self.tlist_centre = np.full(self.N_time,self.tcentre)
         
@@ -44,8 +44,9 @@ class laser:
         self.rabi = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)
         
         self.rabi_beating = lambda t, args: 2*self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*np.abs(np.sin(self.detuning*(t-self.tcentre)))
-        
         self.rabi_beating2 = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*2/np.pi*np.arctan(self.notch_THz*(t-self.tcentre))
+        self.selector1 = np.full(self.N_time, 1 if self.unit_wavevector == -1 else 0)
+        self.selector2 = np.full(self.N_time, 1 if self.unit_wavevector == 1 else 0)
         
         
         
@@ -111,16 +112,19 @@ class Ps_system(HamiltonianClass):
         self.laserDict = dict()
         self.H = []
         self.saved_states =[]
-    def save_states(self):
-        time = 0
-        self.checkpoints = [time]
-        for laser in self.laserDict:
-            time = laser[1].endTime
-            self.checkpoints.append(time)
 
-        for time in self.checkpoints:
-            idx = int(time/self.dt)
-            self.saved_states.append( self.result.states[idx])  
+        self.tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
+        self.tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+
+        self.tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        self.tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        
+        self.tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        self.tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+
+        self.tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        self.tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+    
             
               
     def init_distribution_singular(self):
@@ -275,9 +279,35 @@ class Ps_system(HamiltonianClass):
         self.states = pops*pops.dag() # density matrix   
         
 
+
+    def save_states(self):
+        time = 0
+        self.checkpoints = [time]
+        for laser in self.laserDict:
+            time = laser[1].endTime
+            self.checkpoints.append(time)
+
+        for time in self.checkpoints:
+            idx = int(time/self.dt)
+            self.saved_states.append( self.result.states[idx])  
     def evolve(self):
         opts = qt.Options(store_states=True)
         result = qt.mesolve(self.H, self.states,self.tlist, options = opts,progress_bar=True)
-        
         self.result = result
         self.save_states()
+
+    def evolve_iterator(self):
+        opts = qt.Options(store_states=True)
+        for i in range(len(self.laserDict)):
+            laser = self.laserDict[i][1]
+            args = {"chirp":np.asarray(laser.chirp(laser.tlist,None)),
+                    "wavevector":np.asarray(laser.wavevector(laser.tlist,None)),
+                    "beating":np.asarray(laser.rabi_beating2(laser.tlist,None)),
+                    "selector1":laser.selector1,
+                    "selector2":laser.selector2}
+            self.set_Hamiltonian_notched_MT4(args)
+            result = qt.mesolve(self.H, self.saved_states[i],laser.tlist, options = opts,progress_bar=True)
+
+
+            self.saved_states.append(result.states[-1])
+

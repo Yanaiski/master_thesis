@@ -80,7 +80,7 @@ class HamiltonianClass():
 
         self.init_pulse_cycle()
         
-        # if you coupling between  states more than 1 bin from each other, should probably find a way to make this non-zero...
+        # if you have coupling between  states more than 1 bin from each other, should probably find a way to make this non-zero...
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
@@ -156,6 +156,20 @@ class HamiltonianClass():
         
         H.append([-hbar*(tensor_ge +tensor_eg),self.rabi_beating2*self.func1]) # time-dependent coupling terms               
         H.append([-hbar*(tensor_ge2 +tensor_eg2),self.rabi_beating2*self.func2]) # time-dependent coupling terms               
+
+        self.H = H
+    
+    def set_Hamiltonian_notched_MT4(self,args):        
+        omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
+        
+        H = []
+        H.append(hbar*(self.tensor_num**2*omega_recoil*(self.tensor_g+self.tensor_e))) # kinetic energy
+        H.append([hbar*self.tensor_e,args["chirp"]]) # chirp terms
+        H.append([-hbar*self.omega0*self.tensor_vel/c*self.tensor_e,args["wavevector"]]) # velocity term
+        H.append([hbar*self.tensor_vel/c*self.tensor_e,args["chirp"]*args["wavevector"]]) # velocity term
+        
+        H.append([-hbar*(self.tensor_ge +self.tensor_eg),args["beating"]*args["selector1"]]) # time-dependent coupling terms               
+        H.append([-hbar*(self.tensor_ge2 +self.tensor_eg2),args["beating"]*args["selector2"]]) # time-dependent coupling terms               
 
         self.H = H
 
