@@ -77,7 +77,7 @@ class handler:
         return std
 
 class Ps_system(HamiltonianClass):
-    def __init__(self,N_atoms=1,is_dissipating=None):
+    def __init__(self,N_atoms=1,isDissipative=False):
         self.omega0 = energy_splitting / hbar / hbar_eV# radians THz, energy difference between 1S and 2P in positronium
         self.T = 300 #K temperature of cloud
         self.m = 2*511e3 # eV/c^2
@@ -107,24 +107,15 @@ class Ps_system(HamiltonianClass):
         #self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0],[0,0]])) for n in range(self.N_bins)] # ground 
         #self.e_ops_2P = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0],[0,1]])) for n in range(self.N_bins)] # excited
         self.e_ops = []
-        self.c_ops = []
-
+        if isDissipative:
+            self.c_ops = [qt.tensor()]
+        else:
+            self.c_ops = []
         self.laserDict = dict()
         self.H = []
         self.saved_states =[]
 
-        self.tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        self.tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
-
-        self.tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        self.tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
-        
-        self.tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        self.tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
-
-        self.tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        self.tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
-    
+        self.createTensors(isDissipative)
             
               
     def init_distribution_singular(self):
@@ -290,6 +281,8 @@ class Ps_system(HamiltonianClass):
         for time in self.checkpoints:
             idx = int(time/self.dt)
             self.saved_states.append( self.result.states[idx])  
+    
+ 
     def evolve(self):
         opts = qt.Options(store_states=True)
         result = qt.mesolve(self.H, self.states,self.tlist, options = opts,progress_bar=True)

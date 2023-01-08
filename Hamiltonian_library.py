@@ -215,6 +215,35 @@ class HamiltonianClass():
 
         self.H = H
 
+    def createTensors(self, isDissipative):
+        self.vel_arr = np.diag(self.velocity_bins)
+        self.nn_arr = np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)
+        self.eg_arr = np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)
+        self.ge_arr = np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)
+        
+        # If dissipation is included (annhilation, photoionisation etc.), then insert an additional state for this state
+        if isDissipative:
+            self.vel_arr = self.addDissipation(self.vel_arr)
+            self.nn_arr = self.addDissipation(self.nn_arr)
+            self.eg_arr = self.addDissipation(self.eg_arr)
+            self.ge_arr = self.addDissipation(self.ge_arr)
+            self.tensor_enum = qt.tensor(qt.num(self.N_bins+1,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+        else:
+            self.tensor_enum = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+        
+        self.tensor_vel = qt.tensor(qt.Qobj(self.vel_arr),qt.qeye(2))     
+        self.tensor_g = qt.tensor(qt.Qobj(self.nn_arr),qt.Qobj([[1,0],[0,0]])) # ground 
+        self.tensor_e = qt.tensor(qt.Qobj(self.nn_arr),qt.Qobj([[0,0],[0,1]])) # excited
+        self.tensor_eg = qt.tensor(qt.Qobj(self.eg_arr),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        self.tensor_ge = qt.tensor(qt.Qobj(self.ge_arr),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        self.tensor_eg2 = qt.tensor(qt.Qobj(self.eg_arr),qt.Qobj([[1,0],[0,0]])) # excited to ground
+        self.tensor_ge2 = qt.tensor(qt.Qobj(self.ge_arr),qt.Qobj([[0,0],[0,1]])) # ground to excited
+
+    def addDissipation(self,arr):
+        new_arr = np.insert(arr,self.N_bins,np.zeros(self.N_bins),0)
+        new_arr = np.insert(new_arr,self.N_bins,0,1)
+        return new_arr
+
     def evolve(self):
         pass
 
