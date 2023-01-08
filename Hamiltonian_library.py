@@ -228,16 +228,24 @@ class HamiltonianClass():
             self.eg_arr = self.addDissipation(self.eg_arr)
             self.ge_arr = self.addDissipation(self.ge_arr)
             self.tensor_enum = qt.tensor(qt.num(self.N_bins+1,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+
+            self.qobj_g = qt.Qobj([[1,0,0],[0,0,0],[0,0,0]])
+            self.qobj_e = qt.Qobj([[0,0,0],[0,1,0],[0,0,0]])
+            self.qobj_dis = qt.Qobj([[0,0,0],[0,0,0],[1,1,1]]) #e/g to ionization
         else:
             self.tensor_enum = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
-        
+            self.qobj_g = qt.Qobj([[1,0],[0,0])
+            self.qobj_e = qt.Qobj([[0,0],[0,1])
+            self.qobj_ge = qt.Qobj([[0,0],[1,0]])
+            self.qobj_eg = qt.Qobj([[0,1],[0,0]])
+        # I think I am forced to add a photoionisation state for each velocity state. Meaning each tensor is now a composite of a N_bins size array and a 3x3 matrix
         self.tensor_vel = qt.tensor(qt.Qobj(self.vel_arr),qt.qeye(2))     
-        self.tensor_g = qt.tensor(qt.Qobj(self.nn_arr),qt.Qobj([[1,0],[0,0]])) # ground 
-        self.tensor_e = qt.tensor(qt.Qobj(self.nn_arr),qt.Qobj([[0,0],[0,1]])) # excited
-        self.tensor_eg = qt.tensor(qt.Qobj(self.eg_arr),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        self.tensor_ge = qt.tensor(qt.Qobj(self.ge_arr),qt.Qobj([[0,1],[0,0]])) # ground to excited
-        self.tensor_eg2 = qt.tensor(qt.Qobj(self.eg_arr),qt.Qobj([[1,0],[0,0]])) # excited to ground
-        self.tensor_ge2 = qt.tensor(qt.Qobj(self.ge_arr),qt.Qobj([[0,0],[0,1]])) # ground to excited
+        self.tensor_g = qt.tensor(qt.Qobj(self.nn_arr),self.qobj_g) # ground 
+        self.tensor_e = qt.tensor(qt.Qobj(self.nn_arr),self.qobj_e) # excited
+        self.tensor_eg = qt.tensor(qt.Qobj(self.eg_arr),self.qobj_ge) # excited to ground
+        self.tensor_ge = qt.tensor(qt.Qobj(self.ge_arr),self.qobj_eg) # ground to excited
+        self.tensor_eg2 = qt.tensor(qt.Qobj(self.eg_arr),qt.Qobj([[0,1],[0,0]])) # excited to ground
+        self.tensor_ge2 = qt.tensor(qt.Qobj(self.ge_arr),qt.Qobj([[0,0],[1,0]])) # ground to excited
 
     def addDissipation(self,arr):
         new_arr = np.insert(arr,self.N_bins,np.zeros(self.N_bins),0)
