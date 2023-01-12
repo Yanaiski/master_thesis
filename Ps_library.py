@@ -17,11 +17,10 @@ from config import *
 class laser:
     def __init__(self,pulse_kwargs):
         # Initialising time-variables
-        self.omega0 = energy_splitting / hbar / hbar_eV# radians ps^-1
         self.startTime = pulse_kwargs["start"]
         self.endTime =  pulse_kwargs["end"] #ps 
         
-        self.binwidth = 2*np.pi/self.omega0*100
+        self.binwidth = 2*np.pi/omega0*100
         self.N_time = int((self.endTime-self.startTime)/self.binwidth)
         self.tlist = np.linspace(self.startTime,self.endTime,self.N_time)
         self.tcentre = (self.endTime-self.startTime)/2 + self.startTime #ps
@@ -39,17 +38,17 @@ class laser:
         # eV    * cm
        
         self.label = pulse_kwargs["label"]
-        self.wavenumber_value = self.omega0/c
+        self.wavenumber_value = omega0/c
         self.notch0 = pulse_kwargs["notch"] # cm/ps
-        self.notch_THz = self.notch0 /c*self.omega0 /(2*np.pi) # THz
+        self.notch_THz = self.notch0 /c*omega0 /(2*np.pi) # THz
         self.unit_wavevector = pulse_kwargs["unit_wavevector"]
         
         self.chirp = lambda tlist,args: [self.chirp0 * (t-self.tcentre)  if t >= self.startTime and t < self.endTime else 0 for t in tlist]
         self.wavenumber = lambda tlist,args: [self.unit_wavevector*self.wavenumber_value if t >= self.startTime and t < self.endTime else 0 for t in tlist] 
         self.wavevector = lambda tlist,args: [self.unit_wavevector if t >= self.startTime and t < self.endTime else 0 for t in tlist]
         self.rabi = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)
-        
-
+        self.collapse_rate = np.sqrt(photoionisation_cross_section*eps0*c/(2*omega0)*self.rabi(self.tlist,None)**2*hbar_eV/Debye**2) # sqrt of the photoionisation rate
+        # rabi = d*E/hbar => E = hbar*rabi/d
         self.rabi_beating = lambda t, args: 2*self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*np.abs(np.sin(self.detuning*(t-self.tcentre)))
         self.rabi_beating2 = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*2/np.pi*np.arctan(self.notch_THz*(t-self.tcentre))
         self.selector1 = np.full(self.N_time, 1 if self.unit_wavevector == -1 else 0)
@@ -85,7 +84,6 @@ class handler:
 
 class Ps_system(HamiltonianClass):
     def __init__(self,N_atoms=1,isDissipative=False):
-        self.omega0 = energy_splitting / hbar / hbar_eV# radians THz, energy difference between 1S and 2P in positronium
         self.T = 300 #K temperature of cloud
         self.m = 2*511e3 # eV/c^2
         self.std_deviation = np.sqrt(k*self.T/(self.m/c**2)) #standard deviation of gaussian
@@ -107,17 +105,16 @@ class Ps_system(HamiltonianClass):
         self.momentum_bins = np.linspace(-self.max_momentum,self.max_momentum,self.N_bins) #eV ps/cm 
         self.bins_bins = np.arange(-self.N_bins//2,self.N_bins//2) # array of bins
         
-        self.max_detuning = self.max_vel/c*self.omega0 /(2*np.pi) * 1e3 # GHz
+        self.max_detuning = self.max_vel/c*omega0 /(2*np.pi) * 1e3 # GHz
         self.detuning_bins = np.linspace(-self.max_detuning,self.max_detuning,self.N_bins)
         
         
         self.kets = [qt.basis(self.N_bins,n) for n in range(self.N_bins)]
-        self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0,0],[0,0,0],[0,0,0]])) for n in range(self.N_bins)] # ground 
-        self.e_ops_2P = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,1,0],[0,0,0]])) for n in range(self.N_bins)] # excited
-        self.e_ops_PI = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,0,0],[0,0,1]])) for n in range(self.N_bins)] # photo-ionised states
         
-        self.e_ops = self.e_ops_1S + self.e_ops_2P + self.e_ops_PI
-        #self.c_ops = []
+        
+        
+        self.init_expect_oper(dims=3)
+
         self.laserDict = dict()
         self.H = []
         self.saved_states =[]
@@ -182,7 +179,7 @@ class Ps_system(HamiltonianClass):
         
         
 
-        self.binwidth = 2*np.pi/self.omega0*100
+        self.binwidth = 2*np.pi/omega0*100
         self.N_time = int(self.endTime/self.binwidth)
         self.tlist,self.dt = np.linspace(0,self.endTime,self.N_time,retstep=True)
         self.wavenumber_value = self.laserDict[0][1].wavenumber_value
@@ -203,7 +200,7 @@ class Ps_system(HamiltonianClass):
         self.rabi_beating2 = np.sum([laser[1].rabi_beating2(self.tlist,None) for laser in self.laserDict],axis=0)
 
     
-    def init_states_general(self,internal_state_arr,ret=False):
+    def init_states_general_flattop(self,internal_state_arr,ret=False):
         vel_DM = qt.Qobj(np.sqrt(self.initial_pop))*qt.Qobj(np.sqrt(self.initial_pop)).dag() # density matrix    
         self.states = qt.tensor(vel_DM,qt.Qobj(internal_state_arr)) # density matrix, composite of g/e space and vel space
 
@@ -303,6 +300,21 @@ class Ps_system(HamiltonianClass):
         self.result = result
         self.save_states()
     """
+    def init_collapse_oper(self,laser):
+        self.c_ops = [[qt.tensor(ket*ket.dag(),self.qobj_dis),laser.collapse_rate] for ket in self.kets]
+        print(laser.collapse_rate)
+
+    def init_expect_oper(self,dims):
+        if dims == 2:
+            self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0],[0,0]])) for n in range(self.N_bins)] # ground 
+            self.e_ops_2P = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0],[0,1]])) for n in range(self.N_bins)] # excited
+            self.e_ops = self.e_ops_1S + self.e_ops_2P
+        elif dims == 3:
+            self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0,0],[0,0,0],[0,0,0]])) for n in range(self.N_bins)] # ground 
+            self.e_ops_2P = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,1,0],[0,0,0]])) for n in range(self.N_bins)] # excited
+            self.e_ops_PI = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,0,0],[0,0,1]])) for n in range(self.N_bins)] # photo-ionised states
+            self.e_ops = self.e_ops_1S + self.e_ops_2P + self.e_ops_PI
+
 
     def evolve(self):
         opts = qt.Options(store_states=True)
@@ -316,14 +328,16 @@ class Ps_system(HamiltonianClass):
                     "selector1":laser.selector1,
                     "selector2":laser.selector2}
             #self.set_Hamiltonian_notched_MT4(args)
-            self.collapse_rate = np.sqrt(1/(2*np.pi)*photoionisation_cross_section*eps0*c/(2*hbar_eV*omega0)*laser.rabi(laser.tlist,None)**2)
-            print(self.collapse_rate)
-            self.c_ops = [[qt.tensor(ket*ket.dag(),self.qobj_dis),self.collapse_rate] for ket in self.kets]
-            
+            #print(args["chirp"])
+
+            self.init_collapse_oper(laser)
             self.set_Hamiltonian_MT(args)
             
             result = qt.mesolve(self.H, self.saved_states[i],laser.tlist, e_ops=self.e_ops,c_ops=self.c_ops, options = opts,progress_bar=True)
 
-            self.saved_expect.append(result.expect)
+            # temporary solution for getting expectation values
+            self.saved_expect.append(np.asarray(result.expect))
+
+            # temporarily not usable to get the number of grounds and exciteds due to working with a 3D system
             self.saved_states.append(result.states[-1])
 

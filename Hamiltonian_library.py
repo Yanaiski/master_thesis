@@ -41,26 +41,14 @@ class HamiltonianClass():
     def set_Hamiltonian_MT(self,args):   
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
-        # tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        # tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
-
-        # tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        # tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
-        
-        # tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        # tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
-        
-        # tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        # tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
-        
         H = []
         H.append(hbar*(self.tensor_enum**2*omega_recoil*(self.tensor_g+self.tensor_e))) # kinetic energy
         H.append([hbar*self.tensor_e,args["chirp"]]) # chirp terms
-        H.append([-hbar*self.omega0*self.tensor_vel/c*self.tensor_e,args["wavevector"]]) # velocity term
+        H.append([-hbar*omega0*self.tensor_vel/c*self.tensor_e,args["wavevector"]]) # velocity term
         H.append([hbar*self.tensor_vel/c*self.tensor_e,args["chirp"]*args["wavevector"]]) # velocity term
         
         H.append([-hbar*(0.5*self.tensor_ge +0.5*self.tensor_eg),args["rabi"]*args["selector1"]]) # time-dependent coupling terms               
-        H.append([-hbar*(0.5*self.tensor_ge2 +0.5*self.tensor_eg2),args["rabi"]*args["selector1"]]) # time-dependent coupling terms               
+        H.append([-hbar*(0.5*self.tensor_ge2 +0.5*self.tensor_eg2),args["rabi"]*args["selector2"]]) # time-dependent coupling terms               
         
         self.H = H
 
@@ -89,7 +77,7 @@ class HamiltonianClass():
         H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))) # kinetic energy
         H.append([hbar*tensor_e,self.chirp]) # chirp terms
         H.append([-hbar*np.pi/2*tensor_e,self.notch_function])
-        H.append([-hbar*self.omega0*tensor_vel/c*tensor_e,self.wavevector]) # velocity term
+        H.append([-hbar*omega0*tensor_vel/c*tensor_e,self.wavevector]) # velocity term
         H.append([hbar*tensor_vel/c*tensor_e,self.chirp*self.wavevector]) # velocity term
         
         H.append([-hbar*(0.5*tensor_ge +0.5*tensor_eg),self.rabi*self.func1]) # time-dependent coupling terms               
@@ -115,7 +103,7 @@ class HamiltonianClass():
         H = []
         H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))) # kinetic energy
         H.append([hbar*tensor_e,self.chirp]) # chirp terms
-        H.append([-hbar*self.omega0*tensor_vel/c*tensor_e,self.wavevector]) # velocity term
+        H.append([-hbar*omega0*tensor_vel/c*tensor_e,self.wavevector]) # velocity term
         H.append([hbar*tensor_vel/c*tensor_e,self.chirp*self.wavevector]) # velocity term
         
         H.append([-hbar*(tensor_ge +tensor_eg),self.rabi_beating*self.func1]) # time-dependent coupling terms               
@@ -141,7 +129,7 @@ class HamiltonianClass():
         H = []
         H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))) # kinetic energy
         H.append([hbar*tensor_e,self.chirp]) # chirp terms
-        H.append([-hbar*self.omega0*tensor_vel/c*tensor_e,self.wavevector]) # velocity term
+        H.append([-hbar*omega0*tensor_vel/c*tensor_e,self.wavevector]) # velocity term
         H.append([hbar*tensor_vel/c*tensor_e,self.chirp*self.wavevector]) # velocity term
         
         H.append([-hbar*(tensor_ge +tensor_eg),self.rabi_beating2*self.func1]) # time-dependent coupling terms               
@@ -155,7 +143,7 @@ class HamiltonianClass():
         H = []
         H.append(hbar*(self.tensor_num**2*omega_recoil*(self.tensor_g+self.tensor_e))) # kinetic energy
         H.append([hbar*self.tensor_e,args["chirp"]]) # chirp terms
-        H.append([-hbar*self.omega0*self.tensor_vel/c*self.tensor_e,args["wavevector"]]) # velocity term
+        H.append([-hbar*omega0*self.tensor_vel/c*self.tensor_e,args["wavevector"]]) # velocity term
         H.append([hbar*self.tensor_vel/c*self.tensor_e,args["chirp"]*args["wavevector"]]) # velocity term
         
         H.append([-hbar*(self.tensor_ge +self.tensor_eg),args["beating"]*args["selector1"]]) # time-dependent coupling terms               
@@ -185,7 +173,7 @@ class HamiltonianClass():
         H = []
         H.append(hbar*(self.tensor_num**2*omega_recoil*(self.tensor_g+self.tensor_e))) # kinetic energy
         H.append([hbar*self.tensor_e,self.chirp]) # chirp terms
-        H.append([-hbar*self.omega0*self.tensor_vel/c*self.tensor_e,self.wavevector]) # velocity term
+        H.append([-hbar*omega0*self.tensor_vel/c*self.tensor_e,self.wavevector]) # velocity term
         H.append([hbar*self.tensor_vel/c*self.tensor_e,self.chirp*self.wavevector]) # velocity term
         
         H.append([-hbar*(0.5*self.tensor_ge +0.5*self.tensor_eg),self.rabi*self.func1]) # time-dependent coupling terms               
@@ -205,7 +193,7 @@ class HamiltonianClass():
             qobj_e = qt.Qobj([[0,0,0],[0,1,0],[0,0,0]])
             qobj_ge = qt.Qobj([[0,0,0],[1,0,0],[0,0,0]])
             qobj_eg = qt.Qobj([[0,1,0],[0,0,0],[0,0,0]])
-            self.qobj_dis = qt.Qobj([[0,0,0],[0,0,0],[1,1,0]]) #e/g to ionization
+            self.qobj_dis = qt.Qobj([[0,0,0],[0,0,0],[0,1,0]]) #e/g to ionization
             
         else: 
             qobj_g = qt.Qobj([[1,0],[0,0]])
@@ -222,8 +210,6 @@ class HamiltonianClass():
         self.tensor_ge = qt.tensor(qt.Qobj(ge_arr),qobj_eg) # ground to excited
         self.tensor_eg2 = qt.tensor(qt.Qobj(eg_arr),qobj_eg) # excited to ground
         self.tensor_ge2 = qt.tensor(qt.Qobj(ge_arr),qobj_ge) # ground to excited
-    def initArr4Tensors(self):
-        pass
 
     # UNUSED, originally meant to add a single extra state for photoionisation, but this is not compatible with QuTiP's Hamiltonian formulation
     def addDissipation(self,arr):
