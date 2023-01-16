@@ -47,13 +47,25 @@ class laser:
         self.wavenumber = lambda tlist,args: [self.unit_wavevector*self.wavenumber_value if t >= self.startTime and t < self.endTime else 0 for t in tlist] 
         self.wavevector = lambda tlist,args: [self.unit_wavevector if t >= self.startTime and t < self.endTime else 0 for t in tlist]
         self.rabi = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)
-        self.collapse_rate = np.sqrt(photoionisation_cross_section*eps0*c/(2*omega0)*self.rabi(self.tlist,None)**2*hbar_eV/Debye**2) # sqrt of the photoionisation rate
         # rabi = d*E/hbar => E = hbar*rabi/d
         self.rabi_beating = lambda t, args: 2*self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*np.abs(np.sin(self.detuning*(t-self.tcentre)))
         self.rabi_beating2 = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*2/np.pi*np.arctan(self.notch_THz*(t-self.tcentre))
         self.selector1 = np.full(self.N_time, 1 if self.unit_wavevector == -1 else 0)
         self.selector2 = np.full(self.N_time, 1 if self.unit_wavevector == 1 else 0)
-        
+    
+    
+    def jump_photoionisation(self):
+        self.collapse_rate = np.sqrt(photoionisation_cross_section*eps0*c/(2*omega0)*self.rabi(self.tlist,None)**2*hbar_eV/Debye**2) # sqrt of the photoionisation rate
+    
+    
+    def jump_spontaneous_emission(self):
+        #self.collapse_rate = 1/3e3 # ps
+        self.collapse_rate = 1/3 # ps
+    
+    
+    def jump_annihilation(self):
+        #self.collapse_rate = 1/142e3 # ps
+        self.collapse_rate = 1/142 # ps
         
         
 # handles qutip data
@@ -83,7 +95,7 @@ class handler:
         return std
 
 class Ps_system(HamiltonianClass):
-    def __init__(self,N_atoms=1,isDissipative=False):
+    def __init__(self,N_atoms=1,isDissipative=False,dims=2):
         self.T = 300 #K temperature of cloud
         self.m = 2*511e3 # eV/c^2
         self.std_deviation = np.sqrt(k*self.T/(self.m/c**2)) #standard deviation of gaussian
@@ -113,7 +125,7 @@ class Ps_system(HamiltonianClass):
         
         
         
-        self.init_expect_oper(dims=3)
+        self.init_expect_oper(dims)
 
         self.laserDict = dict()
         self.H = []
@@ -300,10 +312,6 @@ class Ps_system(HamiltonianClass):
         self.result = result
         self.save_states()
     """
-    def init_collapse_oper(self,laser):
-        self.c_ops = [[qt.tensor(ket*ket.dag(),self.qobj_dis),laser.collapse_rate] for ket in self.kets]
-        print(laser.collapse_rate)
-
     def init_expect_oper(self,dims):
         if dims == 2:
             self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0],[0,0]])) for n in range(self.N_bins)] # ground 
@@ -315,8 +323,36 @@ class Ps_system(HamiltonianClass):
             self.e_ops_PI = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,0,0],[0,0,1]])) for n in range(self.N_bins)] # photo-ionised states
             self.e_ops = self.e_ops_1S + self.e_ops_2P + self.e_ops_PI
 
+    """
+    Set jump operator for photo-ionisation
+    """
+    def set_jump_operator_photoionisation(self,args):
+        jump_coupling_strength = np.exp(-1j*(omega0-0.5*args["chirp"]*args["tlist"])*args["tlist"])*np.sqrt(photoionisation_cross_section*eps0*c/(2*omega0)*args["rabi"]**2*hbar_eV/Debye**2) # sqrt of the photoionisation rate
+        self.c_ops = [[qt.tensor(ket*ket.dag(),self.qobj_dis),jump_coupling_strength] for ket in self.kets]
 
-    def evolve(self):
+    """
+    Set jump operator for annihilation
+    """
+    def set_jump_operator_annihilation(self,args):
+        #rate = 1/142e3 # ps
+        rate = 1/3 # ps
+        jump_coupling_strength = np.sqrt(rate)
+        qobj_dis = qt.Qobj([[0,0,0],[0,0,0],[1,0,0]])
+        self.c_ops = [jump_coupling_strength*qt.tensor(ket*ket.dag(),qobj_dis) for ket in self.kets]
+    
+    
+    """
+    Set jump operator for spontaneous emission
+    """
+    def set_jump_operator_spontaneous_emission(self,args):
+        #rate = 1/142e3 # ps
+        rate = 1/3 # ps
+        jump_coupling_strength = np.sqrt(rate)
+        qobj_dis = qt.Qobj([[0,1,0],[0,0,0],[0,0,0]])
+        self.c_ops = [jump_coupling_strength*qt.tensor(ket*ket.dag(),qobj_dis) for ket in self.kets]
+
+
+    def evolve(self,dissipation=None):
         opts = qt.Options(store_states=True)
         self.saved_states.append(self.states)
         for i in range(len(self.laserDict)):
@@ -326,12 +362,21 @@ class Ps_system(HamiltonianClass):
                     "rabi":np.asarray(laser.rabi(laser.tlist,None)),
                     "beating":np.asarray(laser.rabi_beating2(laser.tlist,None)),
                     "selector1":laser.selector1,
-                    "selector2":laser.selector2}
+                    "selector2":laser.selector2,
+                    "tlist":laser.tlist}
             #self.set_Hamiltonian_notched_MT4(args)
             #print(args["chirp"])
 
-            self.init_collapse_oper(laser)
+            #self.init_collapse_oper(laser)
             self.set_Hamiltonian_MT(args)
+            if dissipation == "photoionisation":
+                self.set_jump_operator_photoionisation(args)
+            elif dissipation == "s.e.":
+                self.set_jump_operator_spontaneous_emission(args)
+            elif dissipation == "annihilation":
+                self.set_jump_operator_annihilation(args)
+            
+            self.H.append(hbar*self.tensor_dissipative*(-1e5))
             
             result = qt.mesolve(self.H, self.saved_states[i],laser.tlist, e_ops=self.e_ops,c_ops=self.c_ops, options = opts,progress_bar=True)
 

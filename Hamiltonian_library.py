@@ -15,6 +15,9 @@ from Hamiltonian_library import *
 from config import *
 
 class HamiltonianClass():
+    """
+    Old Hamiltonian with no momentum transfer functionality
+    """
     def  set_Hamiltonian_noCMT(self,laserLabel):
         laser = self.laserDict[laserLabel]
 
@@ -109,7 +112,7 @@ class HamiltonianClass():
         H.append([-hbar*(tensor_ge +tensor_eg),self.rabi_beating*self.func1]) # time-dependent coupling terms               
         H.append([-hbar*(tensor_ge2 +tensor_eg2),self.rabi_beating*self.func2]) # time-dependent coupling terms               
 
-        self.H = H
+        self.H = self.H + H
 
     # beating with arctan definition
     def set_Hamiltonian_notched_MT3(self):        
@@ -137,6 +140,9 @@ class HamiltonianClass():
 
         self.H = H
     
+    """
+    blabla
+    """
     def set_Hamiltonian_notched_MT4(self,args):        
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
@@ -151,6 +157,10 @@ class HamiltonianClass():
 
         self.H = H
 
+
+    """
+    For use in Krotov optimization
+    """
     def set_Hamiltonian_Optimization(self,guess_phase,guess_envelope,detuning):        
         omega_recoil = 0
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
@@ -167,19 +177,14 @@ class HamiltonianClass():
         
         self.H = H
 
-    def set_Hamiltonian_MT_dissipation(self):   
-        omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
-        
-        H = []
-        H.append(hbar*(self.tensor_num**2*omega_recoil*(self.tensor_g+self.tensor_e))) # kinetic energy
-        H.append([hbar*self.tensor_e,self.chirp]) # chirp terms
-        H.append([-hbar*omega0*self.tensor_vel/c*self.tensor_e,self.wavevector]) # velocity term
-        H.append([hbar*self.tensor_vel/c*self.tensor_e,self.chirp*self.wavevector]) # velocity term
-        
-        H.append([-hbar*(0.5*self.tensor_ge +0.5*self.tensor_eg),self.rabi*self.func1]) # time-dependent coupling terms               
-        H.append([-hbar*(0.5*self.tensor_ge2 +0.5*self.tensor_eg2),self.rabi*self.func2]) # time-dependent coupling terms               
 
-        self.H = H
+
+    def include_SE(self):
+        pass
+    def include_photoionisation(self):
+        pass
+    def include_annihilation(self):
+        pass
 
     def createTensors(self, isDissipative):
         vel_arr = np.diag(self.velocity_bins)
@@ -187,23 +192,26 @@ class HamiltonianClass():
         eg_arr = np.sum(np.asarray([self.kets[n]*self.kets[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)
         ge_arr = np.sum(np.asarray([self.kets[n+1]*self.kets[n].dag() for n in range(1,self.N_bins-1)]),axis=0)
         num_internal_states = 2 + int(isDissipative)
-        # If dissipation is included (annhilation, photoionisation etc.), then insert an additional state for this state
+        
+        # If dissipation is included (annhilation, photoionisation etc.),
+        # then insert an additional state for this state
         if isDissipative:
             qobj_g = qt.Qobj([[1,0,0],[0,0,0],[0,0,0]])
             qobj_e = qt.Qobj([[0,0,0],[0,1,0],[0,0,0]])
             qobj_ge = qt.Qobj([[0,0,0],[1,0,0],[0,0,0]])
             qobj_eg = qt.Qobj([[0,1,0],[0,0,0],[0,0,0]])
             self.qobj_dis = qt.Qobj([[0,0,0],[0,0,0],[0,1,0]]) #e/g to ionization
-            
+            self.tensor_dissipative = qt.tensor(qt.qeye(self.N_bins),self.qobj_dis)   
         else: 
             qobj_g = qt.Qobj([[1,0],[0,0]])
             qobj_e = qt.Qobj([[0,0],[0,1]])
             qobj_ge = qt.Qobj([[0,0],[1,0]])
             qobj_eg = qt.Qobj([[0,1],[0,0]])
             self.c_ops = []
-        # I think I am forced to add a photoionisation state for each velocity state. Meaning each tensor is now a composite of a N_bins size array and a 3x3 matrix
+        #print(self.qobj_dis)
         self.tensor_enum = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(num_internal_states)) # enumerated tensor
         self.tensor_vel = qt.tensor(qt.Qobj(vel_arr),qt.qeye(num_internal_states))  
+        
         self.tensor_g = qt.tensor(qt.Qobj(nn_arr),qobj_g) # ground 
         self.tensor_e = qt.tensor(qt.Qobj(nn_arr),qobj_e) # excited
         self.tensor_eg = qt.tensor(qt.Qobj(eg_arr),qobj_ge) # excited to ground
@@ -211,12 +219,7 @@ class HamiltonianClass():
         self.tensor_eg2 = qt.tensor(qt.Qobj(eg_arr),qobj_eg) # excited to ground
         self.tensor_ge2 = qt.tensor(qt.Qobj(ge_arr),qobj_ge) # ground to excited
 
-    # UNUSED, originally meant to add a single extra state for photoionisation, but this is not compatible with QuTiP's Hamiltonian formulation
-    def addDissipation(self,arr):
-        new_arr = np.insert(arr,self.N_bins,np.zeros(self.N_bins),0)
-        new_arr = np.insert(new_arr,self.N_bins,0,1)
-        return new_arr
-
+    
     def evolve(self):
         pass
 
@@ -225,6 +228,12 @@ class HamiltonianClass():
 """
 NOT USED. LEGACY CODE
 
+
+# UNUSED, originally meant to add a single extra state for photoionisation, but this is not compatible with QuTiP's Hamiltonian formulation
+    def addDissipation(self,arr):
+        new_arr = np.insert(arr,self.N_bins,np.zeros(self.N_bins),0)
+        new_arr = np.insert(new_arr,self.N_bins,0,1)
+        return new_arr
 
     # NOT USED
     def set_Hamiltonian_MT3(self):        
