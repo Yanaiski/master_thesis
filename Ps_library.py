@@ -95,7 +95,7 @@ class handler:
         return std
 
 class Ps_system(HamiltonianClass):
-    def __init__(self,N_atoms=1,isDissipative=False,dims=2):
+    def __init__(self,N_atoms=1):
         self.T = 300 #K temperature of cloud
         self.m = 2*511e3 # eV/c^2
         self.std_deviation = np.sqrt(k*self.T/(self.m/c**2)) #standard deviation of gaussian
@@ -110,7 +110,6 @@ class Ps_system(HamiltonianClass):
         self.velocity_bins = np.linspace(-self.max_vel,self.max_vel,self.N_bins) #cm/ps
         self.initial_pop = np.zeros(self.N_bins)
         self.dv_bins = np.arange(-self.N_bins//2,self.N_bins//2)
-        
     
         self.dp = 173 # eV ps/cm, 1 unit of momentum transfer with wavelength 247e-9nm onto Ps
         self.max_momentum = self.dp*self.N_bins//2 # eV ps/cm
@@ -120,19 +119,25 @@ class Ps_system(HamiltonianClass):
         self.max_detuning = self.max_vel/c*omega0 /(2*np.pi) * 1e3 # GHz
         self.detuning_bins = np.linspace(-self.max_detuning,self.max_detuning,self.N_bins)
         
-        
-        self.kets = [qt.basis(self.N_bins,n) for n in range(self.N_bins)]
-        
-        
-        
-        self.init_expect_oper(dims)
+        # Default values. Safe to override outside of class definition
+        self.flag_SE_simple = False
+        self.flag_SE_distributive = False
+        self.flag_annihilation = False
+        self.flag_photoionisation = False
 
+        self.internal_dims = 2
+        self.kets_vel = [qt.basis(self.N_bins,n) for n in range(self.N_bins)]
+        
+        self.c_ops = []
+        self.e_ops = []
         self.laserDict = dict()
         self.H = []
         self.saved_states =[]
-        self.saved_expect = []
+        #self.saved_expect = []
 
-        self.createTensors(isDissipative)
+        self.idx_e_ops = dict(); self.order = 0
+        self.expect = dict()
+        self.create_composite
             
               
     def init_distribution_singular(self):
@@ -147,20 +152,12 @@ class Ps_system(HamiltonianClass):
         for i in range(self.N_bins-1):
             self.initial_pop[i] = int(sp.integrate.quad(lambda v: self.amplitude*np.exp(-(v-v0)**2/(2*std_deviation**2))*1e5,self.velocity_bins[i],self.velocity_bins[i+1])[0])
 
+
     def reset_distribution(self,states):
         N_g,N_e,N = self.get_states(states)
         self.initial_pop = N
         self.init_states_desymmetrized()
-    # get initial Maxwell-Boltzmann distribution
-    def get_initial_pop_plot(self):
-        fig,ax = plt.subplots()
-        #ax.fill_between(self.velocity_bins,0,self.initial_pop)
-        ax.plot(self.velocity_bins,self.initial_pop,'.')
-        ax.set_xlabel("velocities [cm/ps]")
-        ax.set_ylabel("Number of Ps")
-        
-        return fig,ax
-    
+     
 
     def get_states(self, states="default"):
         ## for some reason the default states dont give the right result
@@ -174,7 +171,6 @@ class Ps_system(HamiltonianClass):
             N = np.asarray([np.abs(states[2*i,2*i])+np.abs(states[2*i+1,2*i+1]) for i in range(self.N_bins)]) # total
         return N_g,N_e,N
     
-
 
     # instantiate a new object with name given by label
     def init_pulse(self,pulse_kwargs):
@@ -234,16 +230,6 @@ class Ps_system(HamiltonianClass):
         if ret == True:
             return self.states
         
-    def return_plot_all_states(self):
-        N_ground = self.get_ground()
-        N_excited = self.get_excited()
-
-        fig = plt.figure()
-        plt.bar(self.velocity_bins,N_ground,width=self.dv,color="blue",label="N_g")
-        plt.bar(self.velocity_bins,N_excited,width=self.dv,color="green",bottom=N_ground,label="N_e")
-        plt.xlabel("velocities [cm/ps]")
-        plt.ylabel("Number of atoms")
-        return fig        
 
     # Initialise desymmetrized states
     def init_states_desymmetrized(self,ret=False):
@@ -262,37 +248,6 @@ class Ps_system(HamiltonianClass):
         if ret == True:
             return self.states
 
-    
-    def init_states_desymmetrized2(self):
-        ground = np.zeros(self.N_bins)
-        excited = np.zeros(self.N_bins)
-        for i in range(self.N_bins):
-            if i < self.N_bins//2:
-                if i % 2 == 0:
-                    ground[i] = np.sqrt(self.initial_pop[i])
-            else:
-                if i % 2 != 0:
-                    excited[i] = np.sqrt(self.initial_pop[i])
-
-        ground_DM = qt.Qobj(ground)*qt.Qobj(ground).dag() # density matrix    
-        excited_DM = qt.Qobj(excited)*qt.Qobj(excited).dag() # density matrix   
-        
-        self.states = qt.tensor(ground_DM,qt.Qobj([[1,0],[0,0]])) +qt.tensor(excited_DM,qt.Qobj([[0,0],[0,1]])) 
-
-    # assume Hamiltonian only affects the even n ground states and odd n excited states
-    def init_states_ground_fast(self):
-        pops = np.zeros(self.N_bins)
-        for i in range(0,self.N_bins,2):
-            if i % 2 == 0:
-                pops[i] = np.sqrt(self.initial_MB)[i]
-            else: 
-                #print(self.notch_function)
-                pops[i] = 0
-        
-        pops = qt.Qobj(pops)
-        self.states = pops*pops.dag() # density matrix   
-        
-
 
     def save_states(self):
         time = 0
@@ -305,84 +260,39 @@ class Ps_system(HamiltonianClass):
             idx = int(time/self.dt)
             self.saved_states.append( self.result.states[idx])  
     
-    """
+
+
+    def organise_result_expect(self,result):
+        # the class object keeps track of where the populations of each internal dimension is indexed in result.expect
+        # for each internal dimension, make a new dictionary entry with label corresponding to internal dimension and 
+        for label in self.idx_e_ops:         
+            idx_range = self.idx_e_ops[label]
+            self.expect[label] = np.asarray(result.expect)[idx_range,-1]
+            
+        
+    def newfunc_saved_dm(self,result):
+        pass
+
+
+    # generalised
     def evolve(self):
-        opts = qt.Options(store_states=True)
-        result = qt.mesolve(self.H, self.states,self.tlist, options = opts,progress_bar=True)
-        self.result = result
-        self.save_states()
-    """
-    def init_expect_oper(self,dims):
-        if dims == 2:
-            self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0],[0,0]])) for n in range(self.N_bins)] # ground 
-            self.e_ops_2P = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0],[0,1]])) for n in range(self.N_bins)] # excited
-            self.e_ops = self.e_ops_1S + self.e_ops_2P
-        elif dims == 3:
-            self.e_ops_1S = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[1,0,0],[0,0,0],[0,0,0]])) for n in range(self.N_bins)] # ground 
-            self.e_ops_2P = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,1,0],[0,0,0]])) for n in range(self.N_bins)] # excited
-            self.e_ops_PI = [qt.tensor(self.kets[n]*self.kets[n].dag(),qt.Qobj([[0,0,0],[0,0,0],[0,0,1]])) for n in range(self.N_bins)] # photo-ionised states
-            self.e_ops = self.e_ops_1S + self.e_ops_2P + self.e_ops_PI
-
-    """
-    Set jump operator for photo-ionisation
-    """
-    def set_jump_operator_photoionisation(self,args):
-        jump_coupling_strength = np.exp(-1j*(omega0-0.5*args["chirp"]*args["tlist"])*args["tlist"])*np.sqrt(photoionisation_cross_section*eps0*c/(2*omega0)*args["rabi"]**2*hbar_eV/Debye**2) # sqrt of the photoionisation rate
-        self.c_ops = [[qt.tensor(ket*ket.dag(),self.qobj_dis),jump_coupling_strength] for ket in self.kets]
-
-    """
-    Set jump operator for annihilation
-    """
-    def set_jump_operator_annihilation(self,args):
-        #rate = 1/142e3 # ps
-        rate = 1/3 # ps
-        jump_coupling_strength = np.sqrt(rate)
-        qobj_dis = qt.Qobj([[0,0,0],[0,0,0],[1,0,0]])
-        self.c_ops = [jump_coupling_strength*qt.tensor(ket*ket.dag(),qobj_dis) for ket in self.kets]
-    
-    
-    """
-    Set jump operator for spontaneous emission
-    """
-    def set_jump_operator_spontaneous_emission(self,args):
-        #rate = 1/142e3 # ps
-        rate = 1/3 # ps
-        jump_coupling_strength = np.sqrt(rate)
-        qobj_dis = qt.Qobj([[0,1,0],[0,0,0],[0,0,0]])
-        self.c_ops = [jump_coupling_strength*qt.tensor(ket*ket.dag(),qobj_dis) for ket in self.kets]
-
-
-    def evolve(self,dissipation=None):
         opts = qt.Options(store_states=True)
         self.saved_states.append(self.states)
         for i in range(len(self.laserDict)):
             laser = self.laserDict[i][1]
             args = {"chirp":np.asarray(laser.chirp(laser.tlist,None)),
-                    "wavevector":np.asarray(laser.wavevector(laser.tlist,None)),
+                    "wavevector":np.asarray(laser.wavevector(laser.tlist,None))[0],
                     "rabi":np.asarray(laser.rabi(laser.tlist,None)),
                     "beating":np.asarray(laser.rabi_beating2(laser.tlist,None)),
                     "selector1":laser.selector1,
                     "selector2":laser.selector2,
                     "tlist":laser.tlist}
-            #self.set_Hamiltonian_notched_MT4(args)
-            #print(args["chirp"])
 
-            #self.init_collapse_oper(laser)
             self.set_Hamiltonian_MT(args)
-            if dissipation == "photoionisation":
-                self.set_jump_operator_photoionisation(args)
-            elif dissipation == "s.e.":
-                self.set_jump_operator_spontaneous_emission(args)
-            elif dissipation == "annihilation":
-                self.set_jump_operator_annihilation(args)
-            
-            self.H.append(hbar*self.tensor_dissipative*(-1e5))
-            
             result = qt.mesolve(self.H, self.saved_states[i],laser.tlist, e_ops=self.e_ops,c_ops=self.c_ops, options = opts,progress_bar=True)
 
             # temporary solution for getting expectation values
-            self.saved_expect.append(np.asarray(result.expect))
-
+            #self.saved_expect.append(np.asarray(result.expect))
+            self.organise_result_expect(result)
             # temporarily not usable to get the number of grounds and exciteds due to working with a 3D system
-            self.saved_states.append(result.states[-1])
-
+            #self.saved_states.append(result.states[-1])
