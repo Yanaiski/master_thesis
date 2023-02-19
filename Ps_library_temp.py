@@ -23,7 +23,10 @@ class laser:
         self.startTime = pulse_kwargs["start"]
         self.endTime =  pulse_kwargs["end"] #ps 
         
-        self.binwidth = 2*np.pi/omega0*100
+        if "scale" in pulse_kwargs:
+            self.binwidth = 2*np.pi/omega0*pulse_kwargs["scale"]
+        else:
+            self.binwidth = 2*np.pi/omega0*100
         self.N_time = int((self.endTime-self.startTime)/self.binwidth)
         self.tlist = np.linspace(self.startTime,self.endTime,self.N_time)
         self.tcentre = (self.endTime-self.startTime)/2 + self.startTime #ps
@@ -62,25 +65,6 @@ class laser:
         self.rabi_beating2 = lambda t, args: self.rabi0 * np.exp(-4*np.log(2)*(t-self.tcentre)**2/self.pulse_duration**2)*2/np.pi*np.arctan(self.notch_THz*(t-self.tcentre))
         self.selector1 = np.full(self.N_time, 1 if self.unit_wavevector == -1 else 0)
         self.selector2 = np.full(self.N_time, 1 if self.unit_wavevector == 1 else 0)
-    
-
-    """
-    UNUSED
-    """
-    """        
-    def jump_photoionisation(self):
-        self.collapse_rate = np.sqrt(photoionisation_cross_section*eps0*c/(2*omega0)*self.rabi(self.tlist,None)**2*hbar_eV/Debye**2) # sqrt of the photoionisation rate
-    
-    
-    def jump_spontaneous_emission(self):
-        #self.collapse_rate = 1/3e3 # ps
-        self.collapse_rate = 1/3 # ps
-    
-    
-    def jump_annihilation(self):
-        #self.collapse_rate = 1/142e3 # ps
-        self.collapse_rate = 1/142 # ps
-    """
         
 # handles qutip data
 # plotter as well
@@ -119,7 +103,7 @@ class handler:
 
 
 class Ps_system(HamiltonianClass):
-    def __init__(self,N_atoms=1,N_bins=250):
+    def __init__(self,N_atoms=1,N_points=250):
         self.T = 300 #K temperature of cloud
         self.m = 2*511e3 # eV/c^2
         self.std_deviation = np.sqrt(k*self.T/(self.m/c**2)) #standard deviation of gaussian
@@ -127,20 +111,22 @@ class Ps_system(HamiltonianClass):
         self.N_atoms = N_atoms
         #self.rate = 1
         
-        self.N_bins = N_bins
-        if not self.N_bins % 2 == 0:
-            self.N_bins+=1
-        self.momentum_bins = np.arange(-self.N_bins//2,self.N_bins//2)
+        self.N_points = N_points
+        # if self.N_points % 2 == 0:
+        #     print(True)
+        #     self.N_points+=1
+        self.momentum_bins = np.arange(-self.N_points/2,self.N_points/2)
+        print(self.momentum_bins.shape)
         self.dv = 1.5e-7 # cm/ps, calculated such that 1 step is the equivalent of 1 unit of photon momentum for Ps        
         self.velocity_bins = self.dv*self.momentum_bins
         #self.velocity_bins = np.linspace(-self.max_vel,self.max_vel,self.N_bins) #cm/ps
-        self.initial_pop = np.zeros(self.N_bins)
+        self.initial_pop = np.zeros(self.N_points)
     
         self.dp = 173 # eV ps/cm, 1 unit of momentum transfer with wavelength 247e-9nm onto Ps
         self.real_momentum_bins = self.dp*self.momentum_bins #eV ps/cm 
-        self.max_vel = self.dv*self.N_bins//2
+        self.max_vel = self.dv*self.N_points//2
         self.max_detuning = self.max_vel/c*omega0 /(2*np.pi) * 1e3 # GHz
-        self.detuning_bins = np.linspace(-self.max_detuning,self.max_detuning,self.N_bins)
+        self.detuning_bins = np.linspace(-self.max_detuning,self.max_detuning,self.N_points)
         
         # Default values. Safe to override outside of class definition
         self.flag_SE_simple = False
@@ -149,7 +135,7 @@ class Ps_system(HamiltonianClass):
         self.flag_photoionisation = False
 
         self.internal_dims = 2
-        self.kets_vel = [qt.basis(self.N_bins,n) for n in range(self.N_bins)]
+        self.kets_vel = [qt.basis(self.N_points,n) for n in range(self.N_points)]
         
         self.c_ops = []
         self.e_ops = []
@@ -161,39 +147,20 @@ class Ps_system(HamiltonianClass):
         self.idx_e_ops = dict(); self.order = 0
         self.expect = dict()
             
-              
+    
     def init_distribution_singular(self):
-        self.initial_pop[self.N_bins//2] = self.N_atoms
-    def init_distribution_constant(self):
-        self.initial_pop = np.full(self.N_bins,self.N_atoms/self.N_bins)
-        print(self.initial_pop[-4:])
+        self.initial_pop[self.N_points//2] = self.N_atoms
+    def init_distribution_flattop(self):
+        #self.initial_pop = np.full(self.N_points,self.N_atoms/self.N_points)
+        self.initial_pop = np.full(self.N_points,1)
+        
     
     # Assume Maxwell-Boltzmann distribution
     def init_MBdistribution(self,v0=0,std_deviation=None):
         if std_deviation == None:
             std_deviation = self.std_deviation
-        for i in range(self.N_bins-1):
-            self.initial_pop[i] = sp.integrate.quad(lambda v: self.amplitude*np.exp(-(v-v0)**2/(2*std_deviation**2))*self.N_atoms,self.velocity_bins[i],self.velocity_bins[i+1])[0]
-
-
-    def reset_distribution(self,states):
-        N_g,N_e,N = self.get_states(states)
-        self.initial_pop = N
-        self.init_states_desymmetrized()
-     
-
-    def get_states(self, states="default"):
-        ## for some reason the default states dont give the right result
-        if states == "default":
-            N_g = np.asarray([np.abs(self.states[2*i,2*i]) for i in range(self.N_bins)])
-            N_e = np.asarray([np.abs(self.states[2*i+1,2*i+1]) for i in range(self.N_bins)])
-            N = np.asarray([np.abs(self.states[2*i,2*i])+np.abs(self.states[2*i+1,2*i+1]) for i in range(self.N_bins)]) # total
-        else:
-            N_g = np.asarray([np.abs(states[2*i,2*i]) for i in range(self.N_bins)])
-            N_e = np.asarray([np.abs(states[2*i+1,2*i+1]) for i in range(self.N_bins)])
-            N = np.asarray([np.abs(states[2*i,2*i])+np.abs(states[2*i+1,2*i+1]) for i in range(self.N_bins)]) # total
-        return N_g,N_e,N
-    
+        for i in range(self.N_points-1):
+            self.initial_pop[i] = sp.integrate.quad(lambda v: self.amplitude*np.exp(-(v-v0)**2/(2*std_deviation**2))*self.N_atoms,self.velocity_bins[i],self.velocity_bins[i+1])[0]    
 
     # instantiate a new object with name given by label
     def init_pulse(self,pulse_kwargs):
@@ -232,7 +199,7 @@ class Ps_system(HamiltonianClass):
 
     
     def init_states_general_flattop(self,internal_state_arr,ret=False):
-        vel_DM = qt.Qobj(np.sqrt(self.initial_pop))*qt.Qobj(np.sqrt(self.initial_pop)).dag() # density matrix    
+        vel_DM = qt.qdiags(self.initial_pop,0) # density matrix    
         self.states = qt.tensor(vel_DM,qt.Qobj(internal_state_arr)) # density matrix, composite of g/e space and vel space
 
         if ret == True:
@@ -241,8 +208,8 @@ class Ps_system(HamiltonianClass):
 
     # Initialise states in ground
     def init_states_ground(self,ret=False):
-        vel_DM = qt.qdiags(np.sqrt(self.initial_pop) # density matrix    
-        DM_1S = qt.ket2dm(qt.basis(self.internal_dims,0))
+        vel_DM = qt.qdiags(self.initial_pop,0) # density matrix    
+        DM_1S = qt.basis(self.internal_dims,0)
         self.states = qt.tensor(vel_DM,DM_1S) # density matrix, composite of g/e space and vel space
 
         if ret == True:
@@ -251,7 +218,7 @@ class Ps_system(HamiltonianClass):
 
     # Initialise states in excited
     def init_states_excited(self,ret=False):
-        vel_DM = qt.qdiags(self.initial_pop) # density matrix    
+        vel_DM = qt.qdiags(self.initial_pop,0) # density matrix    
         DM_2P = qt.ket2dm(qt.basis(self.internal_dims,1))
         states = qt.tensor(vel_DM,DM_2P) # density matrix, composite of g/e space and vel space
         
@@ -272,17 +239,19 @@ class Ps_system(HamiltonianClass):
 
         #self.states = qt.tensor(qt.Qobj(np.diag(negatives)),DM_1S) + qt.tensor(qt.Qobj(np.diag(positives)),DM_2P)
         
-        ground = np.zeros(self.N_bins)
-        excited = np.zeros(self.N_bins)
-        for i in range(self.N_bins):
-            if i < self.N_bins//2:
-                ground[i] = np.sqrt(self.initial_pop[i])
-            else:
-                excited[i] = np.sqrt(self.initial_pop[i])
+        # ground = np.zeros(self.N_bins)
+        # excited = np.zeros(self.N_bins)
+        # for i in range(self.N_bins):
+        #     if i < self.N_bins//2:
+        #         ground[i] = np.sqrt(self.initial_pop[i])
+        #     else:
+        #         excited[i] = np.sqrt(self.initial_pop[i])
 
-        ground_DM = qt.Qobj(ground)*qt.Qobj(ground).dag() # density matrix    
-        excited_DM = qt.Qobj(excited)*qt.Qobj(excited).dag() # density matrix   
+        # ground_DM = qt.Qobj(ground)*qt.Qobj(ground).dag() # density matrix    
+        # excited_DM = qt.Qobj(excited)*qt.Qobj(excited).dag() # density matrix   
         
+        ground_DM = qt.qdiags([self.initial_pop[i] if i < self.N_points//2 else 0 for i in range(self.N_points)],0)
+        excited_DM = qt.qdiags([self.initial_pop[i] if i > self.N_points//2 else 0 for i in range(self.N_points)],0)
         
         self.states = qt.tensor(ground_DM,DM_1S) +qt.tensor(excited_DM,DM_2P) 
         
@@ -340,8 +309,8 @@ class Ps_system(HamiltonianClass):
         pass
 
 
-    # generalised
     def evolve(self,save_path=None):
+        self.laserDict = sorted(self.laserDict.items(),key=lambda x:x[1].order)
         opts = qt.Options(store_states=True)
         self.saved_states.append(self.states)
         for i in range(len(self.laserDict)):
@@ -369,37 +338,3 @@ class Ps_system(HamiltonianClass):
                 new_path = save_path +laser.label+".csv"
                 self.states = result.states[-1]
                 qt.qsave(self.states,new_path)
-            
-    # change saving so that it saves the state and expeccts  to files, and then wipes from object's memory.
-    def evolve_memory_friendly(self,save_path):
-        opts = qt.Options(store_states=True)
-        for i in range(len(self.laserDict)):
-            laser = self.laserDict[i][1]
-            new_path = save_path +laser.label+".csv"
-            args = {"chirp":np.asarray(laser.chirp(laser.tlist,None)),
-                    "wavevector":laser.direction,
-                    "rabi":np.asarray(laser.rabi(laser.tlist,None)),
-                    "beating":np.asarray(laser.rabi_beating2(laser.tlist,None)),
-                    "selector1":laser.selector1,
-                    "selector2":laser.selector2,
-                    "tlist":laser.tlist,
-                    "omega_L0":laser.omega_L0}
-            
-            self.create_composite(laser)
-            self.set_Hamiltonian_MT(args)
-            print("Simulating pulse number "+str(laser.order)+" ....")
-            result = qt.mesolve(self.H, self.states,laser.tlist, e_ops=self.e_ops,c_ops=self.c_ops, options = opts)
-            print("Done!")
-            self.organise_result_expect(result)
-            #self.saved_states.append(result.states[-1])
-            
-            del self.states
-            gc.collect()
-
-            self.states = result.states[-1]
-
-            del result
-            gc.collect()
-            
-            qt.qsave(self.states,new_path)
-            # change saving so that it saves the state and expeccts  to files, and then wipes from object's memory.
