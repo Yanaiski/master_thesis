@@ -18,35 +18,47 @@ class HamiltonianClass():
     """
     Old Hamiltonian with no momentum transfer functionality
     """
-    def  set_Hamiltonian_noCMT(self,laserLabel):
-        laser = self.laserDict[laserLabel]
+    def  set_Hamiltonian_noCMT(self,args):
 
-        tensor1 = qt.tensor(qt.qeye(self.N_bins),qt.Qobj([[0,0],[0,1]]))
-        tensorn = qt.tensor(qt.num(self.N_bins,offset=1),qt.Qobj([[0,0],[0,1]]))
-        tensord = qt.tensor(qt.qeye(self.N_bins),qt.sigmax())
+
+        tensor1 = qt.tensor(qt.qeye(self.N_points),qt.Qobj([[0,0],[0,1]]))
+        tensorn = qt.tensor(qt.num(self.N_points,offset=1),qt.Qobj([[0,0],[0,1]]))
+        tensord = qt.tensor(qt.qeye(self.N_points),qt.sigmax())
         vel_squared = qt.Qobj(self.velocity_bins)*qt.Qobj(self.velocity_bins).dag()
         
 
-        H0 = hbar*(laser.detuning+laser.direction*self.velocity_bins[0]/c*(laser.omega0+laser.detuning))*tensor1
-        Hv0 = hbar * self.dv * (laser.omega0 + laser.detuning) * laser.direction/c * tensorn
-        H_v_chirp = hbar*laser.chirp*laser.direction*self.dv/c*tensorn
-        H_chirp = hbar * laser.chirp*(1+laser.direction*self.velocity_bins[0]/c)*tensor1
-        H_transition = 0.5*hbar*tensord
+        # H0 = hbar*(laser.detuning+laser.direction*self.velocity_bins[0]/c*(laser.omega0+laser.detuning))*self.tensor_e
+        # Hv0 = hbar * self.dv * (laser.omega0 + laser.detuning) * laser.direction/c * self.tensor_enum
+        # H_v_chirp = hbar*laser.chirp*laser.direction*self.dv/c*self.tensor_enum
+        # H_chirp = hbar * laser.chirp*(1+laser.direction*self.velocity_bins[0]/c)*self.tensor_e
+        # H_transition = 0.5*hbar*tensord
 
-        H = [H0,Hv0,[H_chirp+H_v_chirp,laser.tlist-laser.tlist_centre],[H_transition,laser.rabi]]
-        
-        opts = qt.Options(store_states=True)
-        result = qt.mesolve(H, self.states,laser.tlist, options = opts)
-        self.states = result.states[-1]
+        # H = [H0,Hv0,[H_chirp+H_v_chirp,laser.tlist-laser.tlist_centre],[H_transition,laser.rabi]]
+
+        H = []
+        H.append(omega0*self.tensor_e - (self.tensor_qeye+self.tensor_vel/c)*args["omega_L0"]*self.tensor_e)
+        H.append([(self.tensor_qeye+self.tensor_vel/c)*self.tensor_e,args["chirp"]])
+        H.append([0.5*hbar*tensord,args["rabi"]])
+        self.H = H
+        #opts = qt.Options(store_states=True)
+        #result = qt.mesolve(H, self.states,laser.tlist, options = opts)
+        #self.states = result.states[-1]
             
-    # Momentum Transfer included
-    # i.e velocity bins are no longer independent from each other
+
+    """
+    Hamiltonian including momentum transfer
+    """
     def set_Hamiltonian_MT(self,args):   
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
+        # re-dub omega0 -> omega_L0 where appropriate, for the 
         
         H = []
-        H.append(-hbar*args["wavevector"]*omega0*self.tensor_vel/c*self.tensor_e+hbar*(self.tensor_enum**2*omega_recoil*(self.tensor_g+self.tensor_e))) # kinetic energy
-        H.append([hbar*self.tensor_e+hbar*args["wavevector"]*self.tensor_vel/c*self.tensor_e,args["chirp"]]) # chirp terms
+        H.append(-hbar*args["wavevector"]*args["omega_L0"]*self.tensor_vel/c*self.tensor_e
+                    +hbar*(self.tensor_enum**2*omega_recoil*(self.tensor_g+self.tensor_e)
+                    +hbar*(omega0 - args["omega_L0"])*self.tensor_e))
+        
+        H.append([hbar*self.tensor_e
+                  +hbar*args["wavevector"]*self.tensor_vel/c*self.tensor_e,args["chirp"]]) # chirp terms
         H.append([-hbar*(0.5*self.tensor_ge +0.5*self.tensor_eg),args["rabi"]*args["selector1"]]) # time-dependent coupling terms               
         H.append([-hbar*(0.5*self.tensor_ge2 +0.5*self.tensor_eg2),args["rabi"]*args["selector2"]]) # time-dependent coupling terms               
         
@@ -58,6 +70,166 @@ class HamiltonianClass():
         self.H = H
 
 
+    def set_Hamiltonian_MT_general(self,rabi_frequency,phi,**kwargs):          
+        # phi is the derivative of the instantaneous laser frequency with v=0
+        H = []
+        H.append(hbar*omega0*self.tensor_e)
+        H.append([-hbar*(self.tensor_qeye+self.tensor_vel/c)*self.tensor_e,phi])
+        H.append([hbar*(self.tensor_ge +self.tensor_eg),rabi_frequency*kwargs["selector1"]]) # time-dependent coupling terms               
+        H.append([hbar*(self.tensor_ge2 +self.tensor_eg2),rabi_frequency*kwargs["selector2"]]) # time-dependent coupling terms               
+
+        self.H = H
+
+    # delta : \Delta*t
+    def set_Hamiltonian_MT_general2(self,rabi_frequency,delta,**kwargs):          
+        H = []
+        H.append(hbar*omega0*self.tensor_e-(self.tensor_qeye+self.tensor_vel/c)*self.tensor_e*kwargs["omega_L0"])
+        H.append([-hbar*(self.tensor_qeye+self.tensor_vel/c)*self.tensor_e,delta])
+        H.append([hbar*(self.tensor_ge +self.tensor_eg),rabi_frequency*kwargs["selector1"]]) # time-dependent coupling terms               
+        H.append([hbar*(self.tensor_ge2 +self.tensor_eg2),rabi_frequency*kwargs["selector2"]]) # time-dependent coupling terms               
+
+        self.H = H
+
+    # for each new dissipation channel do:
+    # 1. Expand the internal state arrays
+    # 2. Define the coupling strength between the environment and system, along with the jump operator, and add them onto the current list of collapse operators
+    # 3. Add new expectation operator to the current list of e_ops
+    def include_SE_simple(self,laser,flag_SE_simple=False):
+        if flag_SE_simple:
+            # dissipation is between already-existing states. So no need to expand dimensions.
+            oper_SE = qt.projection(self.internal_dims,0,1)
+            rate_SE_simple = 1/30 # THz
+            coupling_strength_SE = np.sqrt(rate_SE_simple)
+            self.c_ops += [coupling_strength_SE*qt.tensor(qt.qeye(self.N_points),oper_SE)]
+    
+    def include_SE_distributive(self,flag_SE_distributive=False):
+        if flag_SE_distributive:
+            # dissipation is between already-existing states. So no need to expand dimensions.
+            oper_SE = qt.projection(self.internal_dims,0,1)
+            rate_SE = 1/30 # THz
+            oper = []
+            for n in range(1,self.N_points-1):
+                oper.append(np.sqrt(rate_SE)*0.6*qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),oper_SE))
+                oper.append(np.sqrt(rate_SE)*0.2*qt.tensor(self.kets_vel[n+1]*self.kets_vel[n].dag(),oper_SE))
+                oper.append(np.sqrt(rate_SE)*0.2*qt.tensor(self.kets_vel[n-1]*self.kets_vel[n].dag(),oper_SE))
+
+            oper_SE_distributive = sum(oper)
+            self.c_ops += [oper_SE_distributive]
+
+
+    def include_photoionisation(self, laser, flag_photoionisation=False):
+        if flag_photoionisation:
+            self.internal_dims +=1 
+            oper_photoionisation = qt.projection(self.internal_dims,self.internal_dims-1,1)
+            # values greater than 5e-2 gives huge photoionisation effects
+            coupling_constant = 6e-2#photoionisation_cross_section*eps0*c*hbar/(2*omega0*Debye)
+            coupling_strength_photoionisation = np.sqrt(coupling_constant*laser.rabi(laser.tlist,None)**2)
+            self.add_new_dissipative_state(oper_photoionisation,coupling_strength_photoionisation)
+            self.proj_photoionisation = qt.ket2dm(qt.basis(self.internal_dims,self.internal_dims-1))
+            self.e_ops +=   [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_photoionisation) for n in range(self.N_points)]
+            self.idx_e_ops["photoionisation"] = np.arange(self.order*self.N_points,(self.order+1)*self.N_points)
+
+            self.order +=1
+
+
+    def include_annihilation(self,flag_annihilation=False):
+        if flag_annihilation:
+            self.internal_dims +=1
+            oper_annhilation = qt.projection(self.internal_dims,self.internal_dims-1,0)
+            rate_annihilation = 1/3 # ps
+            coupling_strength_annihilation = np.sqrt(rate_annihilation)
+            self.add_new_dissipative_state(oper_annhilation,coupling_strength_annihilation)
+            self.proj_annihilation = qt.ket2dm(qt.basis(self.internal_dims,self.internal_dims-1))
+            self.e_ops += [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_annihilation) for n in range(self.N_points)]
+            self.idx_e_ops["ann."] = np.arange(self.order*self.N_points,(self.order+1)*self.N_points)            
+            self.order +=1
+
+ 
+    """
+    add a new liouville operator to the list of current ones, given a liouville operator and corresponding coupling strength.
+    The coupling strength can be a single value, or a function over time given as a list
+    """
+    def add_new_dissipative_state(self,jump_operator,coupling_strength,):
+        if type(coupling_strength) == type([]) or type(coupling_strength) == type(np.asarray([])):
+            new_op = [[qt.tensor(ket*ket.dag(),jump_operator),coupling_strength] for ket in self.kets_vel]
+            self.c_ops += new_op
+        else:
+            try:
+                float(coupling_strength)
+                new_op = [coupling_strength*qt.tensor(ket*ket.dag(),jump_operator) for ket in self.kets_vel]
+                self.c_ops += new_op
+            except ValueError:
+                print("Environment coupling strength cannot be typecast to float") 
+
+
+    def create_velocity_space(self):
+        self.qobj_vel = qt.Qobj(np.diag(self.velocity_bins))
+        self.qobj_n_prev = qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0))
+        self.qobj_n_next = qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0))
+    
+
+    def create_internal_state_space(self):
+        self.proj_1S = qt.ket2dm(qt.basis(self.internal_dims,0))
+        self.e_ops +=  [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_1S) for n in range(self.N_points)]
+        self.idx_e_ops["1S"] = np.arange(self.order*self.N_points,(self.order+1)*self.N_points)
+        self.order +=1
+        
+        self.proj_2P = qt.ket2dm(qt.basis(self.internal_dims,1))
+        self.e_ops +=  [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_2P) for n in range(self.N_points)]
+        self.idx_e_ops["2P"] = np.arange(self.order*self.N_points,(self.order+1)*self.N_points)
+        self.order +=1
+        
+        self.proj_1S_to_2P = qt.projection(self.internal_dims,1,0)
+        self.proj_2P_to_1S = qt.projection(self.internal_dims,0,1)
+
+
+    def create_composite(self,laser=None):
+        self.create_velocity_space()
+
+        self.include_annihilation(self.flag_annihilation)
+        self.include_SE_simple(laser,self.flag_SE_simple)
+        self.include_SE_distributive(self.flag_SE_distributive)
+        self.include_photoionisation(laser,self.flag_photoionisation)
+        
+        self.create_internal_state_space()
+        self.tensor_qeye = qt.tensor(qt.qeye(self.N_points),qt.qeye(self.internal_dims))
+        self.tensor_enum = qt.tensor(qt.num(self.N_points,offset=-self.N_points//2+1),qt.qeye(self.internal_dims)) # enumerated tensor
+        self.tensor_vel = qt.tensor(self.qobj_vel,qt.qeye(self.internal_dims))  
+        
+        self.tensor_g = qt.tensor(qt.qeye(self.N_points),self.proj_1S) # ground 
+        self.tensor_e = qt.tensor(qt.qeye(self.N_points),self.proj_2P) # excited
+        self.tensor_eg = qt.tensor(self.qobj_n_prev,self.proj_1S_to_2P) 
+        self.tensor_ge = qt.tensor(self.qobj_n_next,self.proj_2P_to_1S) 
+        self.tensor_eg2 = qt.tensor(self.qobj_n_prev,self.proj_2P_to_1S)
+        self.tensor_ge2 = qt.tensor(self.qobj_n_next,self.proj_1S_to_2P)
+    
+    def evolve(self):
+        pass
+
+
+
+"""
+NOT USED. LEGACY CODE
+
+    def set_Hamiltonian_Optimization(self,guess_phase,guess_envelope,detuning):        
+        omega_recoil = 0
+        tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
+        tensor_num = qt.tensor(qt.num(self.N_points,offset=-self.N_points//2+1),qt.qeye(2)) # enumerated tensor
+        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        
+        H = []
+        H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))-hbar*(self.omega0-(self.omega0+detuning)*(1+tensor_vel/c))*tensor_e)
+        H.append([hbar*(1+tensor_vel/c)*tensor_e,guess_phase]) # chirp terms
+        H.append([-hbar*(0.5*tensor_ge +0.5*tensor_eg),guess_envelope])
+        
+        self.H = H
+
+
+
+
     # Sum of two pulses with two different detunings
     def set_Hamiltonian_notched_MT(self):
 
@@ -67,16 +239,16 @@ class HamiltonianClass():
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+        tensor_num = qt.tensor(qt.num(self.N_points,offset=-self.N_points//2+1),qt.qeye(2)) # enumerated tensor
 
-        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
         
-        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
         
-        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
 
         H = []
         H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))) # kinetic energy
@@ -95,16 +267,16 @@ class HamiltonianClass():
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+        tensor_num = qt.tensor(qt.num(self.N_points,offset=-self.N_points//2+1),qt.qeye(2)) # enumerated tensor
 
-        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
         
-        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
         
-        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
         H = []
         H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))) # kinetic energy
         H.append([hbar*tensor_e,self.chirp]) # chirp terms
@@ -121,16 +293,16 @@ class HamiltonianClass():
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+        tensor_num = qt.tensor(qt.num(self.N_points,offset=-self.N_points//2+1),qt.qeye(2)) # enumerated tensor
 
-        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
         
-        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
 
-        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
         H = []
         H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))) # kinetic energy
         H.append([hbar*tensor_e,self.chirp]) # chirp terms
@@ -142,9 +314,7 @@ class HamiltonianClass():
 
         self.H = H
     
-    """
-    blabla
-    """
+
     def set_Hamiltonian_notched_MT4(self,args):        
         omega_recoil = 0#0.5*hbar*hbar_eV*self.wavenumber_value**2/(self.m/c**2) # 1/ps   
         
@@ -160,174 +330,25 @@ class HamiltonianClass():
         self.H = H
 
 
-    """
-    For use in Krotov optimization
-    """
-    def set_Hamiltonian_Optimization(self,guess_phase,guess_envelope,detuning):        
-        omega_recoil = 0
-        tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
-        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
-        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
-        
-        H = []
-        H.append(hbar*(tensor_num**2*omega_recoil*(tensor_g+tensor_e))-hbar*(self.omega0-(self.omega0+detuning)*(1+tensor_vel/c))*tensor_e)
-        H.append([hbar*(1+tensor_vel/c)*tensor_e,guess_phase]) # chirp terms
-        H.append([-hbar*(0.5*tensor_ge +0.5*tensor_eg),guess_envelope])
-        
-        self.H = H
-
-
-
-    # for each new dissipation channel do:
-    # 1. Expand the internal state arrays
-    # 2. Define the coupling strength between the environment and system, along with the jump operator, and add them onto the current list of collapse operators
-    # 3. Add new expectation operator to the current list of e_ops
-    def include_SE_simple(self,flag_SE_simple=False):
-        if flag_SE_simple:
-            # dissipation is between already-existing states. So no need to expand dimensions.
-            oper_SE_simple = qt.projection(self.internal_dims,0,1)
-            rate_SE_simple = 1/3 # ps
-            coupling_strength_SE = np.sqrt(rate_SE_simple)
-            self.add_new_liouville_operator(oper_SE_simple,coupling_strength_SE)
-            #self.proj_SE_simple = qt.ket2dm(qt.basis(self.internal_dims,self.internal_dims-1))
-            #self.e_ops += [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_SE_simple) for n in range(self.N_bins)]
-            #self.idx_e_ops["simple s.e."] = np.arange(self.order*self.N_bins,(self.order+1)*self.N_bins)
-            #self.order +=1
-    
-    def include_SE_distributive(self,flag_SE_distributive=False):
-        if flag_SE_distributive:
-            # dissipation is between already-existing states. So no need to expand dimensions.
-            oper_SE = qt.projection(self.internal_dims,0,1)
-            rate_SE = 1/3 # ps
-            coupling_strength_SE = np.sqrt(rate_SE)
-            oper_SE_distributive = [0.6*qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),oper_SE)
-                                    + 0.2*qt.tensor(self.kets_vel[n+1]*self.kets_vel[n].dag(),oper_SE)
-                                    + 0.2*qt.tensor(self.kets_vel[n]*self.kets_vel[n+1].dag(),oper_SE) for n in range(self.N_bins-1)]
-            self.c_ops += oper_SE_distributive
-            #self.add_new_liouville_operator(oper_SE,coupling_strength_SE)
-            #self.proj_SE = qt.ket2dm(qt.basis(self.internal_dims,self.internal_dims-1))
-            #self.e_ops += [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_SE) for n in range(self.N_bins)]
-            #self.idx_e_ops["s.e."] = np.arange(self.order*self.N_bins,(self.order+1)*self.N_bins)
-            #self.order +=1
-
-
-    def include_photoionisation(self, flag_photoionisation=False):
-        if flag_photoionisation:
-            self.internal_dims +=1 
-            #self.add_dimension_to_system()
-            oper_photoionisation = qt.projection(self.internal_dims,self.internal_dims-1,1)
-            rate_photoionisation = 1/3 # ps
-            coupling_strength_photoionisation = np.sqrt(rate_photoionisation)
-            self.add_new_liouville_operator(oper_photoionisation,coupling_strength_photoionisation)
-            self.proj_photoionisation = qt.ket2dm(qt.basis(self.internal_dims,self.internal_dims-1))
-            self.e_ops +=   [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_photoionisation) for n in range(self.N_bins)]
-            self.idx_e_ops["photoionisation"] = np.arange(self.order*self.N_bins,(self.order+1)*self.N_bins)
-
-            self.order +=1
-
-
-    def include_annihilation(self,flag_annihilation=False):
-        if flag_annihilation:
-            self.internal_dims +=1
-            oper_annhilation = qt.projection(self.internal_dims,self.internal_dims-1,0)
-            rate_annihilation = 1/3 # ps
-            coupling_strength_annihilation = np.sqrt(rate_annihilation)
-            self.add_new_liouville_operator(oper_annhilation,coupling_strength_annihilation)
-            self.proj_annihilation = qt.ket2dm(qt.basis(self.internal_dims,self.internal_dims-1))
-            self.e_ops += [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_annihilation) for n in range(self.N_bins)]
-            self.idx_e_ops["ann."] = np.arange(self.order*self.N_bins,(self.order+1)*self.N_bins)            
-            self.order +=1
-
- 
-    """
-    add a new liouville operator to the list of current ones, given a liouville operator and corresponding coupling strength.
-    The coupling strength can be a single value, or a function over time given as a list
-    """
-    def add_new_liouville_operator(self,jump_operator,coupling_strength,):
-        if coupling_strength == type(list):
-            new_op = [[qt.tensor(ket*ket.dag(),self.qobj_dis),coupling_strength] for ket in self.kets_vel]
-            self.c_ops += new_op
-        else:
-            try:
-                float(coupling_strength)
-                new_op = [coupling_strength*qt.tensor(ket*ket.dag(),jump_operator) for ket in self.kets_vel]
-                self.c_ops += new_op
-            except ValueError:
-                print("Environment coupling strength cannot be typecast to float") 
-
-
-    def create_velocity_space(self):
-        self.qobj_vel = qt.Qobj(np.diag(self.velocity_bins))
-        self.qobj_n_prev = qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0))
-        self.qobj_n_next = qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0))
-
-
-    def create_internal_state_space(self):
-        self.proj_1S = qt.ket2dm(qt.basis(self.internal_dims,0))
-        self.e_ops +=  [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_1S) for n in range(self.N_bins)]
-        self.idx_e_ops["1S"] = np.arange(self.order*self.N_bins,(self.order+1)*self.N_bins)
-        self.order +=1
-        
-        self.proj_2P = qt.ket2dm(qt.basis(self.internal_dims,1))
-        self.e_ops +=  [qt.tensor(self.kets_vel[n]*self.kets_vel[n].dag(),self.proj_2P) for n in range(self.N_bins)]
-        self.idx_e_ops["2P"] = np.arange(self.order*self.N_bins,(self.order+1)*self.N_bins)
-        self.order +=1
-        
-        self.proj_1S_to_2P = qt.projection(self.internal_dims,1,0)
-        self.proj_2P_to_1S = qt.projection(self.internal_dims,0,1)
-
-
-    def create_composite(self):
-        self.create_velocity_space()
-
-        self.include_annihilation(self.flag_annihilation)
-        self.include_SE_simple(self.flag_SE_simple)
-        self.include_SE_distributive(self.flag_SE_distributive)
-        self.include_photoionisation(self.flag_photoionisation)
-        
-        self.create_internal_state_space()
-        
-        self.tensor_enum = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(self.internal_dims)) # enumerated tensor
-        self.tensor_vel = qt.tensor(self.qobj_vel,qt.qeye(self.internal_dims))  
-        
-        self.tensor_g = qt.tensor(qt.qeye(self.N_bins),self.proj_1S) # ground 
-        self.tensor_e = qt.tensor(qt.qeye(self.N_bins),self.proj_2P) # excited
-        self.tensor_eg = qt.tensor(self.qobj_n_prev,self.proj_1S_to_2P) 
-        self.tensor_ge = qt.tensor(self.qobj_n_next,self.proj_2P_to_1S) 
-        self.tensor_eg2 = qt.tensor(self.qobj_n_prev,self.proj_2P_to_1S)
-        self.tensor_ge2 = qt.tensor(self.qobj_n_next,self.proj_1S_to_2P)
-    
-    def evolve(self):
-        pass
-
-
-
-"""
-NOT USED. LEGACY CODE
-
-
 # UNUSED, originally meant to add a single extra state for photoionisation, but this is not compatible with QuTiP's Hamiltonian formulation
     def addDissipation(self,arr):
-        new_arr = np.insert(arr,self.N_bins,np.zeros(self.N_bins),0)
-        new_arr = np.insert(new_arr,self.N_bins,0,1)
+        new_arr = np.insert(arr,self.N_points,np.zeros(self.N_points),0)
+        new_arr = np.insert(new_arr,self.N_points,0,1)
         return new_arr
 
     # NOT USED
     def set_Hamiltonian_MT3(self):        
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))     
-        tensor_num = qt.tensor(qt.num(self.N_bins,offset=-self.N_bins//2+1),qt.qeye(2)) # enumerated tensor
+        tensor_num = qt.tensor(qt.num(self.N_points,offset=-self.N_points//2+1),qt.qeye(2)) # enumerated tensor
 
-        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
         
-        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n-1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n-1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n-1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n-1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
         
-        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_eg2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge2 = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(1,self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
 
         states = self.states
         for laser in self.laserDict:
@@ -360,11 +381,11 @@ NOT USED. LEGACY CODE
         omega_recoil = 0.5*hbar*hbar_eV*laser.wavenumber_value**2/(self.m/c**2) # 1/ps   
         print(omega_recoil)
         tensor_vel = qt.tensor(qt.Qobj(np.diag(self.velocity_bins)),qt.qeye(2))        
-        tensor_num = qt.tensor(qt.num(self.N_bins,offset=1),qt.qeye(2)) # enumerated tensor
-        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
-        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_bins)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
-        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(self.N_bins-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
-        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(self.N_bins-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
+        tensor_num = qt.tensor(qt.num(self.N_points,offset=1),qt.qeye(2)) # enumerated tensor
+        tensor_g = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[1,0],[0,0]])) # ground 
+        tensor_e = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n].dag() for n in range(self.N_points)]),axis=0)),qt.Qobj([[0,0],[0,1]])) # excited
+        tensor_eg = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n]*self.kets_vel[n+1].dag() for n in range(self.N_points-1)]),axis=0)),qt.Qobj([[0,0],[1,0]])) # excited to ground
+        tensor_ge = qt.tensor(qt.Qobj(np.sum(np.asarray([self.kets_vel[n+1]*self.kets_vel[n].dag() for n in range(self.N_points-1)]),axis=0)),qt.Qobj([[0,1],[0,0]])) # ground to excited
         
         
         H = []

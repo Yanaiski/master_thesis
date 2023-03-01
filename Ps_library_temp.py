@@ -44,8 +44,6 @@ class laser:
         #self.dipole_moment = 1*Debye
         #self.beam_width = 5e-1 # cm
         #self.energy = np.pi**2*hbar_eV**2*c*eps0/(32*np.sqrt(2*np.log(2)))*self.rabi0**2*self.beam_width**3*self.pulse_duration/self.dipole_moment**2
-        # (eV ps)^2 * (cm/ps) * (e^2 / eV / cm) * THz^2 * cm^3 * ps / (e cm)^2
-        # eV    * cm
        
 
         
@@ -68,7 +66,7 @@ class laser:
         
 # handles qutip data
 # plotter as well
-class handler:
+class data_handler:
     def __init__(self):
         self.figures = dict()
         return None
@@ -95,12 +93,30 @@ class handler:
 
     def expect_standard_deviation(self,DM,N_bins):
         DM_vel = DM.ptrace(0).unit() # partial trace to get DM over velocity space
-        oper_momentum = qt.num(N_bins,offset=-N_bins+1)
+        oper_momentum = qt.num(N_bins,offset=-N_bins/2+1)
         #print("first moment: "+str((oper_momentum*DM_vel).tr()**2))
         #print("second moment: "+str((oper_momentum**2*DM_vel).tr()))
         std = np.sqrt((oper_momentum**2*DM_vel).tr()-((oper_momentum*DM_vel).tr())**2)
         return std
+    
+    def expect_standard_deviation2(self,ket,N_bins):
+        #ket_vel = ket.ptrace(0).unit() # partial trace to get ket over velocity space
+        oper_momentum = qt.num(N_bins,offset=-N_bins/2+1)
+        std = np.sqrt(np.abs(np.asarray(ket.dag()*oper_momentum**2*ket - ket.dag()*oper_momentum*ket)[0][0]))
 
+        return std
+    
+
+    """
+    Calculate energy via the energy density. Assume that the transverse beam is Gaussian with a width given by transverse_width
+    """
+    def calculate_pulse_energy(self,envelope_z, transverse_width):
+        integral_z = sp.integrate.simpson(envelope_z**2)
+        print(integral_z)
+        integral_r = np.sqrt(np.pi/2)*transverse_width**3/16 # analytical expression of integral with a Gausian distribution for transverse Efield
+        print(integral_r)
+        U = np.pi*eps0*hbar_eV**2/Debye**2*integral_z*integral_r # gives energy in eV
+        return U*1.6e-19 # converts to J
 
 class Ps_system(HamiltonianClass):
     def __init__(self,N_atoms=1,N_points=250):
@@ -116,7 +132,6 @@ class Ps_system(HamiltonianClass):
         #     print(True)
         #     self.N_points+=1
         self.momentum_bins = np.arange(-self.N_points/2,self.N_points/2)
-        print(self.momentum_bins.shape)
         self.dv = 1.5e-7 # cm/ps, calculated such that 1 step is the equivalent of 1 unit of photon momentum for Ps        
         self.velocity_bins = self.dv*self.momentum_bins
         #self.velocity_bins = np.linspace(-self.max_vel,self.max_vel,self.N_bins) #cm/ps
@@ -146,8 +161,15 @@ class Ps_system(HamiltonianClass):
 
         self.idx_e_ops = dict(); self.order = 0
         self.expect = dict()
-            
     
+    """
+    Returns momentum operator for system
+    """
+    def e_momemtum(self):
+        op = qt.ket2dm(self.real_momentum_bins)
+        return op
+    
+
     def init_distribution_singular(self):
         self.initial_pop[self.N_points//2] = self.N_atoms
     def init_distribution_flattop(self):
@@ -156,7 +178,7 @@ class Ps_system(HamiltonianClass):
         
     
     # Assume Maxwell-Boltzmann distribution
-    def init_MBdistribution(self,v0=0,std_deviation=None):
+    def init_distribution_MB(self,v0=0,std_deviation=None):
         if std_deviation == None:
             std_deviation = self.std_deviation
         for i in range(self.N_points-1):
@@ -208,9 +230,9 @@ class Ps_system(HamiltonianClass):
 
     # Initialise states in ground
     def init_states_ground(self,ret=False):
-        vel_DM = qt.qdiags(self.initial_pop,0) # density matrix    
-        DM_1S = qt.basis(self.internal_dims,0)
-        self.states = qt.tensor(vel_DM,DM_1S) # density matrix, composite of g/e space and vel space
+        qobj_vel = qt.Qobj(self.initial_pop) 
+        basis_1S = qt.basis(self.internal_dims,0)
+        self.states = qt.tensor(qobj_vel,basis_1S) # density matrix, composite of g/e space and vel space
 
         if ret == True:
             return self.states
@@ -218,9 +240,9 @@ class Ps_system(HamiltonianClass):
 
     # Initialise states in excited
     def init_states_excited(self,ret=False):
-        vel_DM = qt.qdiags(self.initial_pop,0) # density matrix    
-        DM_2P = qt.ket2dm(qt.basis(self.internal_dims,1))
-        states = qt.tensor(vel_DM,DM_2P) # density matrix, composite of g/e space and vel space
+        qobj_vel = qt.Qobj(self.initial_pop)
+        basis_2P = qt.basis(self.internal_dims,1)
+        states = qt.tensor(qobj_vel,basis_2P) # density matrix, composite of g/e space and vel space
         
         if ret == True:
             return states
